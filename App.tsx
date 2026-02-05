@@ -46,7 +46,6 @@ const App: React.FC = () => {
     return url.endsWith('api.php') ? url : `${url}/api.php`;
   };
 
-  // --- Sincronización de Configuración (API KEY) ---
   const pullConfig = async () => {
     const apiUrl = getApiUrl();
     if (!apiUrl) return;
@@ -74,7 +73,6 @@ const App: React.FC = () => {
     } catch (e) { console.error("Error al guardar config", e); }
   };
 
-  // --- Sincronización de Registros ---
   const pullFromServer = async (month: number, year: number) => {
     const apiUrl = getApiUrl();
     if (!apiUrl) return null;
@@ -106,7 +104,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      await pullConfig(); // Primero la clave
+      await pullConfig();
       const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
       const serverData = await pullFromServer(selectedMonth, selectedYear);
       
@@ -156,12 +154,21 @@ const App: React.FC = () => {
     setShowSettings(false);
   };
 
-  // --- Funciones de Gasto y Cámara ---
   const addNewExpenseField = (day: number, initialAmount: number = 0, initialLabel: string = '') => {
     setRecords(prev => prev.map(r => {
       if (r.day === day) {
         const newExpense: ExpenseItem = { id: Math.random().toString(36).substr(2, 9), amount: initialAmount, label: initialLabel };
         return { ...r, expenses: [...r.expenses, newExpense], isLocked: true };
+      }
+      return r;
+    }));
+  };
+
+  const removeExpense = (day: number, expenseId: string) => {
+    setRecords(prev => prev.map(r => {
+      if (r.day === day) {
+        const filtered = r.expenses.filter(e => e.id !== expenseId);
+        return { ...r, expenses: filtered, isLocked: filtered.length > 0 };
       }
       return r;
     }));
@@ -226,185 +233,174 @@ const App: React.FC = () => {
   })), [rebalancedRecords]);
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-12">
+    <div className="min-h-screen bg-slate-50 pb-8 text-[13px]">
       <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={onFileChange} className="hidden" />
 
       {/* Modal de Resultados IA */}
       {aiAnalysis && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[3rem] w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 duration-300">
-            <div className="p-8 bg-indigo-600 text-white shrink-0">
-               <div className="flex items-center justify-between mb-2">
-                 <h3 className="text-2xl font-black">Auditoría Gemini AI</h3>
-                 <button onClick={() => setAiAnalysis(null)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-all">
-                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[200] flex items-center justify-center p-3">
+          <div className="bg-white rounded-[1.5rem] w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="p-5 bg-indigo-600 text-white shrink-0">
+               <div className="flex items-center justify-between mb-1">
+                 <h3 className="text-lg font-black tracking-tight">IA Auditor</h3>
+                 <button onClick={() => setAiAnalysis(null)} className="p-1.5 bg-white/10 rounded-full">
+                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                  </button>
                </div>
-               <p className="text-indigo-100 text-sm font-medium">Análisis detallado de tu comportamiento de gasto mensual.</p>
+               <p className="text-indigo-100 text-[11px] font-medium opacity-80">Análisis mensual de gastos.</p>
             </div>
             
-            <div className="p-8 overflow-y-auto space-y-8 flex-grow">
+            <div className="p-5 overflow-y-auto space-y-5 flex-grow">
                <section>
-                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Resumen de IA</h4>
-                 <p className="text-slate-700 leading-relaxed font-medium bg-slate-50 p-6 rounded-3xl border border-slate-100">{aiAnalysis.insight}</p>
+                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Resumen</h4>
+                 <p className="text-slate-700 leading-snug font-medium bg-slate-50 p-4 rounded-xl border border-slate-100">{aiAnalysis.insight}</p>
                </section>
 
                <section>
-                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Recomendaciones</h4>
-                 <div className="grid gap-3">
+                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Recomendaciones</h4>
+                 <div className="grid gap-2">
                    {aiAnalysis.recommendations.map((rec, i) => (
-                     <div key={i} className="flex gap-4 p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
-                       <div className="text-emerald-500 shrink-0">
-                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
-                       </div>
-                       <p className="text-emerald-800 text-sm font-bold">{rec}</p>
-                     </div>
-                   ))}
-                 </div>
-               </section>
-
-               <section>
-                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Fórmulas Google Sheets</h4>
-                 <div className="space-y-4">
-                   {aiAnalysis.googleSheetsFormulas.map((f, i) => (
-                     <div key={i} className="bg-slate-900 rounded-2xl p-5 group transition-all">
-                       <p className="text-[10px] font-black text-indigo-400 uppercase mb-2">{f.label}</p>
-                       <code className="text-indigo-100 text-xs font-mono block overflow-x-auto whitespace-nowrap scrollbar-hide">{f.formula}</code>
+                     <div key={i} className="flex gap-3 p-3 bg-emerald-50 rounded-xl border border-emerald-100">
+                       <svg className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" /></svg>
+                       <p className="text-emerald-800 text-[12px] font-bold">{rec}</p>
                      </div>
                    ))}
                  </div>
                </section>
             </div>
             
-            <div className="p-8 border-t bg-slate-50 shrink-0">
-              <button onClick={() => setAiAnalysis(null)} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black shadow-lg">Entendido</button>
+            <div className="p-4 border-t bg-slate-50">
+              <button onClick={() => setAiAnalysis(null)} className="w-full bg-slate-900 text-white py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg">Cerrar</button>
             </div>
           </div>
         </div>
       )}
 
       {showSettings && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[2.5rem] w-full max-w-md p-8 shadow-2xl animate-in zoom-in-95 duration-200">
-            <h3 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2">Configuración Cloud</h3>
-            <div className="space-y-6">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-3">
+          <div className="bg-white rounded-[1.5rem] w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-black text-slate-800 mb-4 flex items-center gap-2">Configuración Cloud</h3>
+            <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Google Gemini API Key (Se guarda en tu DB)</label>
-                <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-mono text-sm" placeholder="Pega tu clave..." />
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Google Gemini API Key</label>
+                <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase mb-2">URL del Servidor Apache</label>
-                <input type="text" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-mono text-sm" />
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">URL Servidor</label>
+                <input type="text" value={backendUrl} onChange={(e) => setBackendUrl(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs" />
               </div>
-              <button onClick={() => saveSettings(apiKey, backendUrl)} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-slate-800 transition-all">Sincronizar Todo</button>
-              <button onClick={() => setShowSettings(false)} className="w-full text-slate-400 text-sm font-bold">Cerrar</button>
+              <button onClick={() => saveSettings(apiKey, backendUrl)} className="w-full bg-slate-900 text-white py-3 rounded-xl font-black text-xs shadow-xl hover:bg-slate-800 transition-all">Sincronizar</button>
+              <button onClick={() => setShowSettings(false)} className="w-full text-slate-400 text-[11px] font-bold mt-2">Cancelar</button>
             </div>
           </div>
         </div>
       )}
 
-      <header className="bg-white border-b sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-indigo-600 p-2.5 rounded-2xl shadow-lg">
-              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+      <header className="bg-white border-b sticky top-0 z-50 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="bg-indigo-600 p-1.5 rounded-lg">
+              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
             </div>
             <div>
-              <h1 className="text-xl font-black text-slate-800 tracking-tight">GAS Control <span className="text-indigo-600 italic">Cloud</span></h1>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${syncStatus === 'success' ? 'bg-emerald-500' : 'bg-rose-500 animate-pulse'}`}></div>
-                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                  {syncStatus === 'success' ? 'Sincronizado' : 'Error / Offline'} | {apiKey ? 'AI Lista' : 'Sin AI'}
-                </p>
+              <h1 className="text-sm font-black text-slate-800 tracking-tight">GAS <span className="text-indigo-600 italic">Cloud</span></h1>
+              <div className="flex items-center gap-1.5">
+                <div className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'success' ? 'bg-emerald-500' : 'bg-rose-500 animate-pulse'}`}></div>
+                <p className="text-[9px] text-slate-400 font-bold uppercase">{syncStatus === 'success' ? 'Online' : 'Offline'}</p>
               </div>
             </div>
           </div>
-          <button onClick={() => setShowSettings(true)} className="p-2.5 bg-slate-50 text-slate-400 rounded-xl hover:text-indigo-600 transition-all">
-             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
+          <button onClick={() => setShowSettings(true)} className="p-2 bg-slate-50 text-slate-400 rounded-lg hover:text-indigo-600">
+             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
           </button>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
-        <div className="lg:col-span-4 space-y-6">
-          <section className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Meta Diaria</h2>
-            <input type="number" value={initialDailyBudget} onChange={(e) => setInitialDailyBudget(parseFloat(e.target.value) || 0)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-slate-700 text-2xl focus:ring-2 focus:ring-indigo-500 outline-none" />
+      <main className="max-w-7xl mx-auto px-3 mt-4 grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="lg:col-span-4 space-y-4">
+          <section className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+            <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Meta Diaria</h2>
+            <input type="number" value={initialDailyBudget} onChange={(e) => setInitialDailyBudget(parseFloat(e.target.value) || 0)} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-700 text-lg outline-none focus:ring-1 focus:ring-indigo-500" />
           </section>
 
-          <section className="bg-slate-900 p-8 rounded-[2.5rem] shadow-2xl text-white">
-             <h2 className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-8">Saldo Disponible</h2>
-             <p className={`text-6xl font-black tracking-tighter ${summary.currentDailyAllowance < initialDailyBudget ? 'text-rose-400' : 'text-emerald-400'}`}>
+          <section className="bg-slate-900 p-5 rounded-[1.5rem] shadow-xl text-white">
+             <h2 className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest mb-4">Saldo Disponible</h2>
+             <p className={`text-4xl font-black tracking-tighter ${summary.currentDailyAllowance < initialDailyBudget ? 'text-rose-400' : 'text-emerald-400'}`}>
                 ${summary.currentDailyAllowance.toFixed(2)}
              </p>
-             <div className="grid grid-cols-2 gap-6 pt-8 mt-8 border-t border-white/5">
-                <div><p className="text-[10px] text-slate-500 uppercase font-black">Gastado</p><p className="text-2xl font-black">${summary.totalSpent.toFixed(2)}</p></div>
-                <div><p className="text-[10px] text-slate-500 uppercase font-black">Presupuesto</p><p className="text-2xl font-black text-slate-500">${summary.totalBudget.toFixed(2)}</p></div>
+             <div className="grid grid-cols-2 gap-4 pt-4 mt-4 border-t border-white/5">
+                <div><p className="text-[9px] text-slate-500 uppercase font-black">Gastado</p><p className="text-lg font-black">${summary.totalSpent.toFixed(2)}</p></div>
+                <div><p className="text-[9px] text-slate-500 uppercase font-black">Meta Mes</p><p className="text-lg font-black text-slate-500">${summary.totalBudget.toFixed(2)}</p></div>
              </div>
           </section>
 
-          <button onClick={handleRunAnalysis} disabled={loadingAI} className="w-full bg-white border border-slate-200 p-6 rounded-3xl flex items-center justify-between group hover:border-indigo-500 transition-all shadow-md">
-             <div className="flex items-center gap-4">
-                <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all">
-                   {loadingAI ? <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin group-hover:border-white"></div> : <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
+          <button onClick={handleRunAnalysis} disabled={loadingAI} className="w-full bg-white border border-slate-200 p-4 rounded-2xl flex items-center justify-between group hover:border-indigo-500 shadow-sm active:scale-[0.98] transition-all">
+             <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-50 rounded-xl text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white">
+                   {loadingAI ? <div className="w-4 h-4 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin group-hover:border-white"></div> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
                 </div>
-                <div className="text-left"><p className="text-sm font-black text-slate-800">{loadingAI ? 'Analizando...' : 'IA Auditor'}</p><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Revisar Ahorros</p></div>
+                <div className="text-left"><p className="text-xs font-black text-slate-800">{loadingAI ? 'Analizando...' : 'Auditor IA'}</p><p className="text-[9px] text-slate-400 font-bold uppercase">Optimizar Ahorro</p></div>
              </div>
-             {!loadingAI && <svg className="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>}
           </button>
         </div>
 
-        <div className="lg:col-span-8 space-y-6">
-           {/* Gráfico de Barras */}
-           <section className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-200">
-             <div className="h-64 w-full">
+        <div className="lg:col-span-8 space-y-3">
+           <section className="bg-white p-5 rounded-[1.5rem] shadow-sm border border-slate-200">
+             <div className="h-48 w-full">
                <ResponsiveContainer width="100%" height="100%">
                  <BarChart data={chartData}>
                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11, fontWeight: 700}} />
-                   <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11}} />
-                   <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px -12px rgb(0 0 0 / 0.1)'}} />
-                   <Bar dataKey="gasto" radius={[6, 6, 0, 0]} barSize={20}>
+                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 700}} />
+                   <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10}} />
+                   <Bar dataKey="gasto" radius={[4, 4, 0, 0]} barSize={14}>
                      {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.isLocked ? (entry.gasto > entry.meta ? '#f43f5e' : '#6366f1') : '#f1f5f9'} />)}
                    </Bar>
-                   <ReferenceLine y={initialDailyBudget} stroke="#cbd5e1" strokeDasharray="8 8" />
+                   <ReferenceLine y={initialDailyBudget} stroke="#cbd5e1" strokeDasharray="6 6" />
                  </BarChart>
                </ResponsiveContainer>
              </div>
            </section>
 
-           <div className="grid grid-cols-1 gap-4">
+           <div className="space-y-2">
              {rebalancedRecords.map((record) => {
                const isExpanded = expandedDay === record.day;
                const dayTotal = record.expenses.reduce((s, e) => s + e.amount, 0);
                return (
-                 <div key={record.day} className={`bg-white rounded-[2rem] border transition-all ${isExpanded ? 'border-indigo-500 shadow-xl' : 'border-slate-100'}`}>
-                   <div onClick={() => setExpandedDay(isExpanded ? null : record.day)} className="p-6 flex items-center justify-between cursor-pointer">
-                      <div className="flex items-center gap-5">
-                         <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black ${record.isLocked ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-300'}`}>
+                 <div key={record.day} className={`bg-white rounded-2xl border transition-all ${isExpanded ? 'border-indigo-500 shadow-lg' : 'border-slate-100'}`}>
+                   <div onClick={() => setExpandedDay(isExpanded ? null : record.day)} className="p-4 flex items-center justify-between cursor-pointer">
+                      <div className="flex items-center gap-4">
+                         <div className={`w-9 h-9 rounded-lg flex items-center justify-center font-black text-xs ${record.isLocked ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-300'}`}>
                             {record.day}
                          </div>
-                         <div><p className="text-sm font-black text-slate-800">Día {record.day}</p><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Meta: ${record.adjustedBudget.toFixed(2)}</p></div>
+                         <div>
+                            <p className="text-xs font-black text-slate-800">Día {record.day}</p>
+                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">Meta: ${record.adjustedBudget.toFixed(2)}</p>
+                         </div>
                       </div>
-                      <p className={`text-2xl font-black ${dayTotal > record.adjustedBudget ? 'text-rose-500' : 'text-slate-800'}`}>${dayTotal.toFixed(2)}</p>
+                      <p className={`text-lg font-black ${dayTotal > record.adjustedBudget ? 'text-rose-500' : 'text-slate-800'}`}>${dayTotal.toFixed(2)}</p>
                    </div>
                    {isExpanded && (
-                     <div className="p-6 pt-0 space-y-4">
-                        {record.expenses.map(exp => (
-                          <div key={exp.id} className="flex gap-2 animate-in fade-in slide-in-from-left-2">
-                             <input type="text" value={exp.label} onChange={(e) => {
-                               const newRecords = records.map(r => r.day === record.day ? {...r, isLocked: true, expenses: r.expenses.map(x => x.id === exp.id ? {...x, label: e.target.value} : x)} : r);
-                               setRecords(newRecords);
-                             }} className="flex-grow bg-slate-50 p-4 rounded-xl text-sm font-bold border-none outline-none focus:ring-2 focus:ring-indigo-100" />
-                             <input type="number" value={exp.amount} onChange={(e) => {
-                               const newRecords = records.map(r => r.day === record.day ? {...r, isLocked: true, expenses: r.expenses.map(x => x.id === exp.id ? {...x, amount: parseFloat(e.target.value) || 0} : x)} : r);
-                               setRecords(newRecords);
-                             }} className="w-24 bg-slate-50 p-4 rounded-xl text-sm font-black border-none outline-none focus:ring-2 focus:ring-indigo-100" />
-                          </div>
-                        ))}
+                     <div className="p-4 pt-0 space-y-3 border-t border-slate-50 mt-1">
+                        <div className="space-y-2 mt-3">
+                          {record.expenses.map(exp => (
+                            <div key={exp.id} className="flex gap-2 animate-in fade-in slide-in-from-left-1">
+                               <input type="text" value={exp.label} onChange={(e) => {
+                                 const newRecords = records.map(r => r.day === record.day ? {...r, isLocked: true, expenses: r.expenses.map(x => x.id === exp.id ? {...x, label: e.target.value} : x)} : r);
+                                 setRecords(newRecords);
+                               }} className="flex-grow bg-slate-50 px-3 py-2.5 rounded-lg text-xs font-bold outline-none focus:ring-1 focus:ring-indigo-100" placeholder="Descripción" />
+                               <input type="number" value={exp.amount || ''} onChange={(e) => {
+                                 const newRecords = records.map(r => r.day === record.day ? {...r, isLocked: true, expenses: r.expenses.map(x => x.id === exp.id ? {...x, amount: parseFloat(e.target.value) || 0} : x)} : r);
+                                 setRecords(newRecords);
+                               }} className="w-20 bg-slate-50 px-3 py-2.5 rounded-lg text-xs font-black text-right" placeholder="0" />
+                               <button onClick={(e) => { e.stopPropagation(); removeExpense(record.day, exp.id); }} className="p-2 text-rose-300 hover:text-rose-500 transition-colors">
+                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                               </button>
+                            </div>
+                          ))}
+                        </div>
                         <div className="flex gap-2">
-                           <button onClick={() => addNewExpenseField(record.day)} className="flex-grow bg-slate-900 text-white py-4 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-[0.98] transition-all">Nuevo Gasto</button>
-                           <button onClick={() => handleCaptureClick(record.day)} className="bg-indigo-600 text-white p-4 rounded-xl active:scale-[0.98] transition-all shadow-lg">
+                           <button onClick={() => addNewExpenseField(record.day)} className="flex-grow bg-slate-900 text-white py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm">Agregar Gasto</button>
+                           <button onClick={() => handleCaptureClick(record.day)} className="bg-indigo-600 text-white px-5 py-3 rounded-xl shadow-md">
                               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                            </button>
                         </div>
