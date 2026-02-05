@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { DailyRecord, MonthlySummary, AIAnalysisResponse, ExpenseItem } from './types';
-import { analyzeExpenses, extractAmountFromImage } from './services/geminiService';
+import { DailyRecord, MonthlySummary, AIAnalysisResponse, ExpenseItem } from './types.ts';
+import { analyzeExpenses, extractAmountFromImage } from './services/geminiService.ts';
 import { 
   BarChart, 
   Bar, 
@@ -24,9 +24,8 @@ const App: React.FC = () => {
     return saved ? parseFloat(saved) : 50;
   });
   
-  // Prioriza la clave de entorno de Netlify si existe
   const [apiKey, setApiKey] = useState<string>(() => {
-    return localStorage.getItem(API_KEY_STORAGE_KEY) || (typeof process !== 'undefined' ? process.env.API_KEY : '') || '';
+    return localStorage.getItem(API_KEY_STORAGE_KEY) || (typeof process !== 'undefined' && process.env.API_KEY ? process.env.API_KEY : '') || '';
   });
 
   const [showSettings, setShowSettings] = useState(false);
@@ -104,7 +103,6 @@ const App: React.FC = () => {
     localStorage.setItem(API_KEY_STORAGE_KEY, key);
   };
 
-  // FUNCIONES DE EXPORTACIÓN
   const exportToMarkdown = () => {
     const monthName = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(new Date(selectedYear, selectedMonth));
     let md = `# Reporte de Gastos (GAS) - ${monthName}\n\n`;
@@ -312,7 +310,6 @@ const App: React.FC = () => {
             <h1 className="text-xl font-bold text-slate-800 hidden sm:block">GAS Control <span className="text-indigo-600">Pro</span></h1>
           </div>
           <div className="flex items-center gap-2">
-            {/* Botones de Exportación */}
             <div className="flex bg-slate-100 rounded-lg p-1 mr-2 hidden md:flex">
               <button 
                 onClick={exportToMarkdown}
