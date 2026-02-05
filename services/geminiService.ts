@@ -1,23 +1,21 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { FuelEntry, AIInsight } from "../types";
 
 export const analyzeFuelConsumption = async (entries: FuelEntry[]): Promise<AIInsight> => {
+  // Inicialización siguiendo estrictamente las reglas del desarrollador
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
   
-  const historyStr = entries.slice(-10).map(e => 
-    `Fecha: ${e.date}, KM: ${e.odometer}, Litros: ${e.liters}, Precio/L: ${e.pricePerLiter}, Total: ${e.totalCost}`
+  const historyStr = entries.slice(0, 15).map(e => 
+    `- Fecha: ${e.date}, KM: ${e.odometer}, Litros: ${e.liters}, Precio/L: ${e.pricePerLiter}, Total: ${e.totalCost.toFixed(2)}`
   ).join('\n');
 
-  const prompt = `
-    Eres un experto en eficiencia energética y mecánica automotriz. 
-    Analiza los siguientes registros de combustible de mi vehículo:
-    ${historyStr}
+  const prompt = `Analiza mis consumos de gasolina:
+${historyStr}
 
-    Proporciona un análisis breve de mi gasto, 3 consejos específicos para mejorar el rendimiento 
-    y una fórmula de Google Sheets para calcular la proyección de gasto mensual basada en estos datos.
-    Responde estrictamente en formato JSON.
-  `;
+Genera un objeto JSON con:
+1. "analysis": Un resumen profesional de mi eficiencia y gasto.
+2. "tips": Un array con 3 consejos tácticos para ahorrar.
+3. "sheetsFormula": Una fórmula de Google Sheets útil para proyectar gastos anuales basada en el promedio actual.`;
 
   try {
     const response = await ai.models.generateContent({
@@ -37,13 +35,19 @@ export const analyzeFuelConsumption = async (entries: FuelEntry[]): Promise<AIIn
       }
     });
 
-    return JSON.parse(response.text);
+    // La propiedad .text devuelve el string generado directamente
+    const jsonStr = response.text || "{}";
+    return JSON.parse(jsonStr.trim());
   } catch (error) {
-    console.error("Gemini Error:", error);
+    console.error("Error en el análisis de IA:", error);
     return {
-      analysis: "No se pudo realizar el análisis en este momento.",
-      tips: ["Mantén la presión de neumáticos adecuada.", "Evita aceleraciones bruscas."],
-      sheetsFormula: "=SUMA(A:A)*1.1"
+      analysis: "El análisis inteligente no está disponible temporalmente. Por favor, verifica tu conexión o configuración de API.",
+      tips: [
+        "Mantén una velocidad constante en carretera.",
+        "Revisa la presión de los neumáticos mensualmente.",
+        "Evita cargar peso innecesario en el maletero."
+      ],
+      sheetsFormula: "=PROMEDIO(E2:E100)*12"
     };
   }
 };
