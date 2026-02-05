@@ -1,53 +1,90 @@
-import { GoogleGenAI, Type } from "@google/genai";
-import { FuelEntry, AIInsight } from "../types";
 
-export const analyzeFuelConsumption = async (entries: FuelEntry[]): Promise<AIInsight> => {
-  // Inicialización siguiendo estrictamente las reglas del desarrollador
+import { GoogleGenAI, Type } from "@google/genai";
+import { Expense, SpendingAnalysis, ReceiptData } from "../types";
+
+const MODEL_NAME = "gemini-3-flash-preview";
+
+export const scanReceipt = async (base64Image: string): Promise<ReceiptData> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
   
-  const historyStr = entries.slice(0, 15).map(e => 
-    `- Fecha: ${e.date}, KM: ${e.odometer}, Litros: ${e.liters}, Precio/L: ${e.pricePerLiter}, Total: ${e.totalCost.toFixed(2)}`
-  ).join('\n');
-
-  const prompt = `Analiza mis consumos de gasolina:
-${historyStr}
-
-Genera un objeto JSON con:
-1. "analysis": Un resumen profesional de mi eficiencia y gasto.
-2. "tips": Un array con 3 consejos tácticos para ahorrar.
-3. "sheetsFormula": Una fórmula de Google Sheets útil para proyectar gastos anuales basada en el promedio actual.`;
+  const prompt = "Analiza esta imagen de un ticket de compra. Extrae el nombre del comercio, la fecha, el total pagado y los artículos individuales. Clasifica el gasto en una de estas categorías: Alimentación, Transporte, Ocio, Facturas, Salud, Hogar, Otros.";
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: MODEL_NAME,
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType: "image/jpeg", data: base64Image } }
+          ]
+        }
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            merchant: { type: Type.STRING },
+            date: { type: Type.STRING },
+            total: { type: Type.NUMBER },
+            category: { type: Type.STRING },
+            items: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING },
+                  price: { type: Type.NUMBER }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    return JSON.parse(response.text || "{}");
+  } catch (error) {
+    console.error("OCR Error:", error);
+    throw error;
+  }
+};
+
+export const analyzeSpending = async (expenses: Expense[]): Promise<SpendingAnalysis> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+  
+  const history = expenses.slice(0, 30).map(e => `${e.date} | ${e.title} | ${e.category} | $${e.amount}`).join('\n');
+  
+  const prompt = `Analiza mi historial de gastos recientes y proporciona un informe de salud financiera:\n${history}`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
       contents: prompt,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            analysis: { type: Type.STRING },
-            tips: { type: Type.ARRAY, items: { type: Type.STRING } },
-            sheetsFormula: { type: Type.STRING }
+            summary: { type: Type.STRING },
+            warnings: { type: Type.ARRAY, items: { type: Type.STRING } },
+            savingTips: { type: Type.ARRAY, items: { type: Type.STRING } },
+            balanceStatus: { type: Type.STRING, enum: ["Excelente", "Estable", "Crítico"] }
           },
-          required: ["analysis", "tips", "sheetsFormula"]
+          required: ["summary", "warnings", "savingTips", "balanceStatus"]
         }
       }
     });
 
-    // La propiedad .text devuelve el string generado directamente
-    const jsonStr = response.text || "{}";
-    return JSON.parse(jsonStr.trim());
+    return JSON.parse(response.text || "{}");
   } catch (error) {
-    console.error("Error en el análisis de IA:", error);
+    console.error("Analysis Error:", error);
     return {
-      analysis: "El análisis inteligente no está disponible temporalmente. Por favor, verifica tu conexión o configuración de API.",
-      tips: [
-        "Mantén una velocidad constante en carretera.",
-        "Revisa la presión de los neumáticos mensualmente.",
-        "Evita cargar peso innecesario en el maletero."
-      ],
-      sheetsFormula: "=PROMEDIO(E2:E100)*12"
+      summary: "No se pudo generar el análisis.",
+      warnings: [],
+      savingTips: ["Revisa tus gastos hormiga."],
+      balanceStatus: "Estable"
     };
   }
 };
