@@ -1,290 +1,510 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { DayData, DailyExpense, AIInsight } from './types';
-import { syncService } from './services/syncService';
-import { getFinancialAdvice } from './services/geminiService';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { DailyRecord, MonthlySummary, AIAnalysisResponse, ExpenseItem } from './types';
+import { analyzeExpenses, extractAmountFromImage } from './services/geminiService';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer, 
+  Cell,
+  ReferenceLine
+} from 'recharts';
 
-const generateId = () => Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+const STORAGE_KEY_PREFIX = 'gas_control_v3_';
+const BUDGET_STORAGE_KEY = 'gas_control_budget_v3';
+const API_KEY_STORAGE_KEY = 'gemini_api_key_v3';
 
 const App: React.FC = () => {
-  const now = new Date();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-
-  // --- ESTADOS ---
-  const [syncKey, setSyncKey] = useState<string>(localStorage.getItem('sync_key') || '');
-  const [dailyTarget, setDailyTarget] = useState<number>(() => Number(localStorage.getItem('gas_control_target')) || 30);
-  const [days, setDays] = useState<DayData[]>(() => {
-    const local = localStorage.getItem('gas_control_data');
-    return local ? JSON.parse(local) : Array.from({ length: daysInMonth }, (_, i) => ({ day: i + 1, expenses: [] }));
+  const [initialDailyBudget, setInitialDailyBudget] = useState<number>(() => {
+    const saved = localStorage.getItem(BUDGET_STORAGE_KEY);
+    return saved ? parseFloat(saved) : 50;
   });
   
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiInsight, setAiInsight] = useState<AIInsight | null>(null);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // Prioriza la clave de entorno de Netlify si existe
+  const [apiKey, setApiKey] = useState<string>(() => {
+    return localStorage.getItem(API_KEY_STORAGE_KEY) || (typeof process !== 'undefined' ? process.env.API_KEY : '') || '';
+  });
 
-  // --- SINCRONIZACIÓN ---
-  const handleCreateNewId = async () => {
-    setIsSyncing(true);
-    const newKey = await syncService.createKey();
-    if (newKey) {
-      setSyncKey(newKey);
-      localStorage.setItem('sync_key', newKey);
-      await syncService.save(newKey, { days, target: dailyTarget });
-      setSaveStatus('saved');
-      alert(`¡Nueva Llave!\nID: ${newKey}\n\nUsa este código en otros dispositivos.`);
-    }
-    setIsSyncing(false);
-  };
+  const [showSettings, setShowSettings] = useState(false);
+  const [records, setRecords] = useState<DailyRecord[]>([]);
+  const [loadingAI, setLoadingAI] = useState(false);
+  const [scanningDay, setScanningDay] = useState<number | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<AIAnalysisResponse | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [expandedDay, setExpandedDay] = useState<number | null>(new Date().getDate());
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const currentMonthKey = `${STORAGE_KEY_PREFIX}${selectedYear}_${selectedMonth}`;
 
-  const handleConnect = async () => {
-    if (syncKey.length < 4) return alert("ID muy corto");
-    setIsSyncing(true);
-    setSaveStatus('saving');
-    
-    const cloudData = await syncService.load(syncKey);
-    if (cloudData) {
-      if (confirm("¿Descargar datos de la nube? Esto borrará tus datos locales.")) {
-        setDays(cloudData.days);
-        setDailyTarget(cloudData.target);
-        localStorage.setItem('sync_key', syncKey);
-        setSaveStatus('saved');
-      }
-    } else {
-      if (confirm("ID no encontrado en la nube. ¿Deseas subir tus datos actuales para activar este ID?")) {
-        const ok = await syncService.save(syncKey, { days, target: dailyTarget });
-        if (ok) {
-          localStorage.setItem('sync_key', syncKey);
-          setSaveStatus('saved');
-        } else {
-          setSaveStatus('error');
-          alert("Error de conexión con el servidor. El ID podría estar bloqueado o no haber internet.");
-        }
-      }
-    }
-    setIsSyncing(false);
-  };
+  const createNewMonth = (days: number) => Array.from({ length: days }, (_, i) => ({
+    day: i + 1,
+    expenses: [],
+    isLocked: false,
+    adjustedBudget: initialDailyBudget,
+    date: new Date(selectedYear, selectedMonth, i + 1)
+  }));
 
   useEffect(() => {
-    localStorage.setItem('gas_control_data', JSON.stringify(days));
-    localStorage.setItem('gas_control_target', dailyTarget.toString());
+    const savedData = localStorage.getItem(currentMonthKey);
+    const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
     
-    if (syncKey.length > 4) {
-      const timer = setTimeout(async () => {
-        setSaveStatus('saving');
-        const ok = await syncService.save(syncKey, { days, target: dailyTarget });
-        setSaveStatus(ok ? 'saved' : 'error');
-      }, 3000);
-      return () => clearTimeout(timer);
+    if (savedData) {
+      try {
+        const parsed = JSON.parse(savedData);
+        if (parsed.length === daysInMonth) {
+          setRecords(parsed);
+        } else {
+          setRecords(createNewMonth(daysInMonth));
+        }
+      } catch (e) {
+        setRecords(createNewMonth(daysInMonth));
+      }
+    } else {
+      setRecords(createNewMonth(daysInMonth));
     }
-  }, [days, dailyTarget, syncKey]);
+    setAiAnalysis(null);
+  }, [selectedMonth, selectedYear, currentMonthKey]);
 
-  // --- IA Y CÁLCULOS ---
-  const handleAiAnalyze = async () => {
-    setIsAiLoading(true);
-    const allExpenses = days.flatMap(d => d.expenses);
-    const advice = await getFinancialAdvice(allExpenses, dailyTarget * daysInMonth);
-    setAiInsight(advice);
-    setIsAiLoading(false);
+  const rebalancedRecords = useMemo(() => {
+    if (records.length === 0) return [];
+    const totalMonthlyBudget = initialDailyBudget * records.length;
+    let accumulatedSpent = 0;
+    let processedDaysCount = 0;
+
+    return records.map((record) => {
+      const remainingDays = records.length - processedDaysCount;
+      const remainingBudget = totalMonthlyBudget - accumulatedSpent;
+      const currentTarget = remainingDays > 0 ? remainingBudget / remainingDays : 0;
+      const dayTotal = record.expenses.reduce((s, e) => s + e.amount, 0);
+      if (record.isLocked) {
+        accumulatedSpent += dayTotal;
+        processedDaysCount++;
+      }
+      return { ...record, adjustedBudget: currentTarget };
+    });
+  }, [records, initialDailyBudget]);
+
+  useEffect(() => {
+    if (rebalancedRecords.length > 0) {
+      localStorage.setItem(currentMonthKey, JSON.stringify(rebalancedRecords));
+    }
+  }, [rebalancedRecords, currentMonthKey]);
+
+  useEffect(() => {
+    localStorage.setItem(BUDGET_STORAGE_KEY, initialDailyBudget.toString());
+  }, [initialDailyBudget]);
+
+  const saveApiKey = (key: string) => {
+    setApiKey(key);
+    localStorage.setItem(API_KEY_STORAGE_KEY, key);
   };
 
-  const stats = useMemo(() => {
-    const dailyExcesses = days.map(d => {
-      const spent = d.expenses.reduce((sum, e) => sum + e.amount, 0);
-      return { day: d.day, excess: Math.max(0, spent - dailyTarget) };
+  // FUNCIONES DE EXPORTACIÓN
+  const exportToMarkdown = () => {
+    const monthName = new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(new Date(selectedYear, selectedMonth));
+    let md = `# Reporte de Gastos (GAS) - ${monthName}\n\n`;
+    md += `**Presupuesto Base:** $${initialDailyBudget.toFixed(2)}/día\n`;
+    md += `**Total Gastado:** $${summary.totalSpent.toFixed(2)}\n`;
+    md += `**Balance:** $${summary.totalBalance.toFixed(2)}\n\n`;
+    md += `| Día | Descripción | Monto |\n| :--- | :--- | :--- |\n`;
+    
+    rebalancedRecords.forEach(r => {
+      r.expenses.forEach(e => {
+        md += `| ${r.day} | ${e.label || 'Gasto General'} | $${e.amount.toFixed(2)} |\n`;
+      });
     });
-    const totalExcess = dailyExcesses.reduce((sum, d) => sum + d.excess, 0);
 
-    return days.map(d => {
-      const spent = d.expenses.reduce((sum, e) => sum + e.amount, 0);
-      const myExcess = Math.max(0, spent - dailyTarget);
-      const othersExcess = totalExcess - myExcess;
-      const penalty = othersExcess / (daysInMonth - 1 || 1);
-      const assigned = dailyTarget - penalty;
-      return { day: d.day, assigned, spent, remaining: assigned - spent };
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `reporte_gastos_${selectedYear}_${selectedMonth + 1}.md`;
+    link.click();
+  };
+
+  const exportToCSV = () => {
+    let csv = "Dia,Descripcion,Monto\n";
+    rebalancedRecords.forEach(r => {
+      r.expenses.forEach(e => {
+        csv += `${r.day},"${(e.label || 'Gasto').replace(/"/g, '""')}",${e.amount}\n`;
+      });
     });
-  }, [days, dailyTarget, daysInMonth]);
 
-  const addExpense = (dayNum: number) => {
-    const desc = prompt("Descripción:");
-    const amountStr = prompt("Monto:");
-    if (!desc || !amountStr) return;
-    const amount = parseFloat(amountStr);
-    if (isNaN(amount)) return;
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `datos_gastos_${selectedYear}_${selectedMonth + 1}.csv`;
+    link.click();
+  };
 
-    setDays(prev => prev.map(d => 
-      d.day === dayNum ? { ...d, expenses: [...d.expenses, { id: generateId(), amount, description: desc }] } : d
-    ));
+  const handleExpenseChange = (day: number, expenseId: string, field: 'amount' | 'label', value: string) => {
+    setRecords(prev => prev.map(r => {
+      if (r.day === day) {
+        const newExpenses = r.expenses.map(e => {
+          if (e.id === expenseId) {
+            return { ...e, [field]: field === 'amount' ? (parseFloat(value) || 0) : value };
+          }
+          return e;
+        });
+        return { ...r, expenses: newExpenses, isLocked: true };
+      }
+      return r;
+    }));
+  };
+
+  const addNewExpenseField = (day: number, initialAmount: number = 0, initialLabel: string = '') => {
+    setRecords(prev => prev.map(r => {
+      if (r.day === day) {
+        const newExpense: ExpenseItem = { 
+          id: Math.random().toString(36).substr(2, 9), 
+          amount: initialAmount,
+          label: initialLabel 
+        };
+        return { ...r, expenses: [...r.expenses, newExpense], isLocked: true };
+      }
+      return r;
+    }));
+  };
+
+  const removeExpense = (day: number, expenseId: string) => {
+    setRecords(prev => prev.map(r => {
+      if (r.day === day) {
+        const filtered = r.expenses.filter(e => e.id !== expenseId);
+        return { ...r, expenses: filtered, isLocked: filtered.length > 0 };
+      }
+      return r;
+    }));
+  };
+
+  const handleCaptureClick = (day: number) => {
+    if (!apiKey) {
+      setShowSettings(true);
+      alert("Por favor, configura tu API Key de Gemini en los ajustes para usar el escáner.");
+      return;
+    }
+    setScanningDay(day);
+    fileInputRef.current?.click();
+  };
+
+  const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || scanningDay === null || !apiKey) return;
+
+    setLoadingAI(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64 = (reader.result as string).split(',')[1];
+        const amount = await extractAmountFromImage(apiKey, base64, file.type);
+        if (amount !== null && amount > 0) {
+          addNewExpenseField(scanningDay, amount, 'Escaneo Gasto');
+        }
+      } catch (err) {
+        console.error("Error al procesar el ticket", err);
+      } finally {
+        setLoadingAI(false);
+        setScanningDay(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const summary = useMemo<MonthlySummary>(() => {
+    const totalSpent = rebalancedRecords.reduce((acc, r) => acc + r.expenses.reduce((s, e) => s + e.amount, 0), 0);
+    const lockedDays = rebalancedRecords.filter(r => r.isLocked);
+    const daysInMonth = rebalancedRecords.length;
+    const totalBudget = initialDailyBudget * daysInMonth;
+    const remainingBudget = totalBudget - totalSpent;
+    const remainingDaysCount = daysInMonth - lockedDays.length;
+    
+    return {
+      totalBudget,
+      totalSpent,
+      totalBalance: totalBudget - totalSpent,
+      projectedSpending: lockedDays.length > 0 ? (totalSpent / lockedDays.length) * daysInMonth : 0,
+      isOverBudget: totalSpent > totalBudget,
+      currentDailyAllowance: remainingDaysCount > 0 ? remainingBudget / remainingDaysCount : 0
+    };
+  }, [rebalancedRecords, initialDailyBudget]);
+
+  const chartData = useMemo(() => {
+    return rebalancedRecords.map(r => ({
+      name: `D${r.day}`,
+      gasto: r.expenses.reduce((s, e) => s + e.amount, 0),
+      meta: r.adjustedBudget,
+      isLocked: r.isLocked
+    }));
+  }, [rebalancedRecords]);
+
+  const runAIAnalysis = async () => {
+    if (!apiKey) {
+      setShowSettings(true);
+      alert("Configura tu API Key para usar el análisis de IA.");
+      return;
+    }
+    setLoadingAI(true);
+    try {
+      const monthName = new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(new Date(selectedYear, selectedMonth));
+      const result = await analyzeExpenses(apiKey, rebalancedRecords.filter(r => r.isLocked), initialDailyBudget, monthName);
+      setAiAnalysis(result);
+    } catch (error) {
+      console.error("AI Analysis failed", error);
+    } finally {
+      setLoadingAI(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 pb-32">
-      {/* HEADER DINÁMICO */}
-      <nav className="bg-slate-900 text-white px-4 py-4 sticky top-0 z-[200] shadow-xl">
-        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className={`w-3 h-3 rounded-full ${
-              saveStatus === 'saving' ? 'bg-amber-400 animate-pulse' : 
-              saveStatus === 'saved' ? 'bg-emerald-400' : 
-              saveStatus === 'error' ? 'bg-rose-500' : 'bg-slate-600'
-            }`}></div>
-            <h2 className="font-black text-xs uppercase tracking-widest italic">GasControl <span className="text-indigo-400">Pro</span></h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <input 
-              value={syncKey} 
-              onChange={e => setSyncKey(e.target.value)}
-              placeholder="ID Nube"
-              className="bg-white/10 border-none text-white px-4 py-2 rounded-xl text-xs font-bold w-24 md:w-40 focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
-            />
-            <button onClick={handleConnect} disabled={isSyncing} className="bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all active:scale-95 shadow-lg">
-              {isSyncing ? '...' : 'Conectar'}
-            </button>
-            <button onClick={handleCreateNewId} className="bg-white/5 hover:bg-white/10 px-3 py-2 rounded-xl text-[10px] font-black uppercase">Nuevo</button>
+    <div className="min-h-screen bg-slate-50 pb-12">
+      <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={onFileChange} className="hidden" />
+
+      {/* Modal de Ajustes */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-slate-800">Ajustes de IA</h3>
+              <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Gemini API Key</label>
+                <input 
+                  type="password" 
+                  value={apiKey}
+                  onChange={(e) => saveApiKey(e.target.value)}
+                  placeholder="Pega tu clave aquí..."
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                />
+                <p className="mt-2 text-xs text-slate-400 leading-relaxed">
+                  Consigue una clave gratuita en <a href="https://aistudio.google.com/" target="_blank" rel="noopener" className="text-indigo-500 underline">Google AI Studio</a>. 
+                  Esta clave se guarda localmente o se lee desde el entorno para mayor seguridad.
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowSettings(false)}
+                className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-all"
+              >
+                Guardar y Cerrar
+              </button>
+            </div>
           </div>
         </div>
-      </nav>
+      )}
 
-      <header className="bg-white border-b px-6 py-20">
-        <div className="max-w-6xl mx-auto flex flex-col lg:flex-row items-center justify-between gap-12">
-          <div className="text-center lg:text-left space-y-4">
-            <h1 className="text-7xl font-black text-slate-900 tracking-tighter uppercase leading-[0.8] italic">
-              Dashboard<br/><span className="text-indigo-600">Financiero</span>
-            </h1>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.5em]">Optimización de Gasto Diario de Gas</p>
+      <header className="bg-white border-b sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="bg-indigo-600 p-2 rounded-lg shadow-sm">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </div>
+            <h1 className="text-xl font-bold text-slate-800 hidden sm:block">GAS Control <span className="text-indigo-600">Pro</span></h1>
           </div>
+          <div className="flex items-center gap-2">
+            {/* Botones de Exportación */}
+            <div className="flex bg-slate-100 rounded-lg p-1 mr-2 hidden md:flex">
+              <button 
+                onClick={exportToMarkdown}
+                className="p-1.5 hover:bg-white rounded-md text-slate-500 transition-all"
+                title="Exportar Markdown"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              </button>
+              <button 
+                onClick={exportToCSV}
+                className="p-1.5 hover:bg-white rounded-md text-slate-500 transition-all"
+                title="Descargar CSV (Google Sheets)"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              </button>
+            </div>
 
-          <div className="bg-slate-100 p-2 rounded-[4rem] border-8 border-slate-50 shadow-2xl flex divide-x-2 divide-slate-200">
-            <div className="px-10 py-6 text-center">
-              <span className="block text-[9px] font-black text-slate-500 uppercase mb-2">Meta Diaria</span>
-              <div className="flex items-center justify-center gap-1">
-                <span className="text-2xl font-black text-slate-300">$</span>
-                <input 
-                  type="number" 
-                  value={dailyTarget} 
-                  onChange={e => setDailyTarget(Number(e.target.value))}
-                  className="bg-transparent border-none p-0 w-20 text-5xl font-black text-slate-900 focus:ring-0 text-center"
-                />
-              </div>
-            </div>
-            <div className="px-10 py-6 text-center">
-              <span className="block text-[9px] font-black text-slate-500 uppercase mb-2">Total Mes</span>
-              <p className="text-5xl font-black text-indigo-600 tracking-tighter">
-                ${stats.reduce((acc, s) => acc + s.spent, 0).toFixed(1)}
-              </p>
-            </div>
+            <button 
+              onClick={() => setShowSettings(true)}
+              className={`p-2 rounded-lg transition-colors ${!apiKey ? 'text-amber-500 bg-amber-50 animate-pulse' : 'text-slate-400 hover:bg-slate-100'}`}
+              title="Ajustes de API"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            </button>
+            <select 
+              value={selectedMonth} 
+              onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+              className="bg-slate-100 border-none rounded-lg px-3 py-2 text-sm font-semibold focus:ring-2 focus:ring-indigo-500 transition-all"
+            >
+              {Array.from({ length: 12 }, (_, i) => (
+                <option key={i} value={i}>{new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(new Date(2024, i))}</option>
+              ))}
+            </select>
+            <button 
+              onClick={runAIAnalysis}
+              disabled={loadingAI}
+              className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-800 transition-all flex items-center gap-2 disabled:opacity-50 shadow-sm"
+            >
+              {loadingAI ? (
+                <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+              )}
+              <span className="hidden sm:inline">{loadingAI ? 'Analizando...' : 'Análisis IA'}</span>
+            </button>
           </div>
         </div>
       </header>
 
-      {/* PANEL DE IA */}
-      <section className="max-w-6xl mx-auto px-6 mt-12">
-        <div className={`relative overflow-hidden bg-gradient-to-br from-indigo-900 to-slate-900 rounded-[3rem] p-8 md:p-12 shadow-2xl transition-all duration-700 ${aiInsight ? 'min-h-[300px]' : 'min-h-[120px] flex items-center justify-center'}`}>
-          {!aiInsight && !isAiLoading && (
-            <button onClick={handleAiAnalyze} className="group relative bg-white/10 hover:bg-white/20 border-2 border-white/20 px-8 py-4 rounded-full text-white font-black text-xs uppercase tracking-widest transition-all">
-              Consultar Asistente IA
-              <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-emerald-500 rounded-full blur opacity-25 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
-            </button>
-          )}
-          {isAiLoading && (
-            <div className="flex flex-col items-center gap-4 text-white">
-              <div className="w-8 h-8 border-4 border-white/20 border-t-white rounded-full animate-spin"></div>
-              <p className="text-[10px] font-black uppercase tracking-widest animate-pulse">Analizando tus hábitos...</p>
+      <main className="max-w-7xl mx-auto px-4 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="lg:col-span-4 space-y-6">
+          <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Meta Base Diaria</h2>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
+              <input 
+                type="number" 
+                value={initialDailyBudget}
+                onChange={(e) => setInitialDailyBudget(parseFloat(e.target.value) || 0)}
+                className="w-full pl-8 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+              />
             </div>
-          )}
-          {aiInsight && (
-            <div className="text-white space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-1000">
-              <div className="flex justify-between items-start">
-                <div className="space-y-2">
-                  <span className="bg-emerald-500 text-slate-900 px-3 py-1 rounded-full text-[9px] font-black uppercase">Diagnóstico Gemini</span>
-                  <h3 className="text-4xl font-black tracking-tighter leading-none">{aiInsight.analysis}</h3>
-                </div>
-                <button onClick={() => setAiInsight(null)} className="text-white/40 hover:text-white uppercase text-[9px] font-black">Cerrar</button>
+          </section>
+
+          <section className="bg-slate-900 p-6 rounded-2xl shadow-lg text-white">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6">Equilibrio Dinámico</h2>
+            <div className="space-y-6">
+              <div>
+                <p className="text-xs text-slate-400 mb-1">Nueva Cuota Diaria (Restante)</p>
+                <p className={`text-4xl font-black ${summary.currentDailyAllowance < initialDailyBudget ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  ${summary.currentDailyAllowance.toFixed(2)}
+                </p>
               </div>
-              <div className="grid md:grid-cols-2 gap-10">
-                <div className="bg-white/5 p-6 rounded-[2rem] border border-white/10">
-                  <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3">Pronóstico</p>
-                  <p className="text-xl font-bold leading-tight opacity-90">{aiInsight.forecast}</p>
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-800">
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase font-bold">Gastado</p>
+                  <p className="text-xl font-bold">${summary.totalSpent.toFixed(2)}</p>
                 </div>
-                <div className="space-y-4">
-                  <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Recomendaciones PRO</p>
-                  {aiInsight.recommendations.map((rec, i) => (
-                    <div key={i} className="flex gap-4 items-start bg-white/5 p-4 rounded-2xl border border-white/5">
-                      <span className="bg-white/20 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0">{i+1}</span>
-                      <p className="text-sm font-medium leading-tight opacity-80">{rec}</p>
-                    </div>
-                  ))}
+                <div>
+                  <p className="text-[10px] text-slate-500 uppercase font-bold">Mes Total</p>
+                  <p className="text-xl font-bold text-slate-400">${summary.totalBudget.toFixed(2)}</p>
                 </div>
               </div>
             </div>
+          </section>
+
+          {aiAnalysis && (
+            <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 animate-in fade-in slide-in-from-bottom-2 duration-500">
+              <h2 className="text-indigo-600 text-sm font-bold uppercase tracking-widest mb-4 flex items-center gap-2">
+                <span className="w-2 h-2 bg-indigo-600 rounded-full animate-pulse"></span>
+                Insight de la IA
+              </h2>
+              <p className="text-sm text-slate-600 leading-relaxed italic mb-4 border-l-4 border-indigo-100 pl-4">
+                "{aiAnalysis.insight}"
+              </p>
+              <div className="space-y-3">
+                {aiAnalysis.recommendations.map((rec, i) => (
+                  <div key={i} className="flex gap-2 text-xs text-slate-500">
+                    <span className="text-indigo-400 font-bold">•</span>
+                    {rec}
+                  </div>
+                ))}
+              </div>
+            </section>
           )}
         </div>
-      </section>
 
-      <main className="max-w-6xl mx-auto px-6 py-16">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-          {stats.map(s => {
-            const dayData = days.find(d => d.day === s.day);
-            const isToday = s.day === now.getDate();
-            const isOver = s.remaining < 0;
-
-            return (
-              <div key={s.day} className={`bg-white rounded-[4rem] border-4 transition-all flex flex-col ${isToday ? 'border-indigo-500 shadow-2xl ring-8 ring-indigo-50' : 'border-slate-100 shadow-sm opacity-90 hover:opacity-100'}`}>
-                <div className={`p-8 flex justify-between items-center ${isToday ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-800 border-b border-slate-100'} rounded-t-[3.6rem]`}>
-                  <div className="flex items-center gap-4">
-                    <span className="text-4xl font-black tracking-tighter">Día {s.day}</span>
-                    {isToday && <span className="bg-white/20 text-[9px] px-3 py-1.5 rounded-xl font-black uppercase">Hoy</span>}
-                  </div>
-                  <button onClick={() => addExpense(s.day)} className={`w-14 h-14 rounded-2xl flex items-center justify-center text-3xl font-black shadow-lg active:scale-90 transition-all ${isToday ? 'bg-white text-indigo-600' : 'bg-indigo-600 text-white'}`}>
-                    +
-                  </button>
-                </div>
-
-                <div className="p-10 space-y-10 flex-grow">
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Asignación</p>
-                      <p className={`text-2xl font-black ${s.assigned < 0 ? 'text-rose-500' : 'text-slate-900'}`}>${s.assigned.toFixed(2)}</p>
-                    </div>
-                    <div className={`${isOver ? 'bg-rose-50 border-rose-100' : 'bg-emerald-50 border-emerald-100'} p-6 rounded-[2rem] border shadow-inner`}>
-                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Saldo</p>
-                      <p className={`text-2xl font-black ${isOver ? 'text-rose-600' : 'text-emerald-600'}`}>${s.remaining.toFixed(2)}</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
-                    {dayData?.expenses.map(exp => (
-                      <div key={exp.id} className="flex justify-between items-center bg-white p-5 rounded-2xl border-2 border-slate-50 hover:border-indigo-100 transition-all shadow-sm">
-                        <div className="flex-grow">
-                          <p className="text-[9px] font-black text-slate-400 uppercase truncate mb-1">{exp.description}</p>
-                          <p className="text-xl font-black text-slate-800">${exp.amount.toFixed(2)}</p>
-                        </div>
-                        <button onClick={() => confirm("¿Borrar?") && setDays(prev => prev.map(d => d.day === s.day ? {...d, expenses: d.expenses.filter(e => e.id !== exp.id)} : d))} className="text-slate-200 hover:text-rose-500 p-2 transition-colors">
-                          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="4"><path d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
-                      </div>
+        <div className="lg:col-span-8 space-y-8">
+          <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <h2 className="text-lg font-bold text-slate-800 mb-6 flex justify-between items-center">Tendencia Mensual</h2>
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10}} />
+                  <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10}} />
+                  <Tooltip 
+                    cursor={{fill: '#f8fafc'}}
+                    contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
+                    formatter={(value: any, name: any) => [`$${Number(value).toFixed(2)}`, name === 'meta' ? 'Meta Ajustada' : 'Gasto Real']}
+                  />
+                  <Bar dataKey="gasto" radius={[4, 4, 0, 0]}>
+                    {chartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.isLocked ? (entry.gasto > entry.meta ? '#f43f5e' : '#6366f1') : '#e2e8f0'} />
                     ))}
-                  </div>
-                </div>
+                  </Bar>
+                  <ReferenceLine y={initialDailyBudget} stroke="#94a3b8" strokeDasharray="5 5" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
 
-                <div className="px-10 py-8 bg-slate-50 border-t border-slate-100 flex justify-between items-center rounded-b-[3.6rem]">
-                  <span className="text-[10px] font-black text-slate-400 uppercase">Consumo total</span>
-                  <span className="font-black text-slate-900 text-3xl tracking-tighter">${s.spent.toFixed(2)}</span>
-                </div>
-              </div>
-            );
-          })}
+          <section className="space-y-4">
+            <h2 className="text-lg font-bold text-slate-800 px-2 flex justify-between items-center">Desglose Diario</h2>
+            <div className="space-y-3">
+              {rebalancedRecords.map((record) => {
+                const isExpanded = expandedDay === record.day;
+                const dayTotal = record.expenses.reduce((s, e) => s + e.amount, 0);
+                const isOver = record.isLocked && dayTotal > record.adjustedBudget;
+
+                return (
+                  <div key={record.day} className={`bg-white rounded-2xl border transition-all duration-300 overflow-hidden ${isExpanded ? 'border-indigo-500 shadow-md ring-1 ring-indigo-500/20' : 'border-slate-200'}`}>
+                    <div onClick={() => setExpandedDay(isExpanded ? null : record.day)} className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold transition-colors ${record.isLocked ? (isOver ? 'bg-rose-50 text-rose-600' : 'bg-indigo-50 text-indigo-600') : 'bg-slate-100 text-slate-400'}`}>
+                          {record.day}
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-slate-700">Día {record.day}</p>
+                          <p className={`text-[10px] font-bold uppercase ${record.adjustedBudget < initialDailyBudget ? 'text-rose-400' : 'text-slate-400'}`}>
+                            Meta: ${record.adjustedBudget.toFixed(2)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-6">
+                        <p className={`text-lg font-black tracking-tight ${isOver ? 'text-rose-500' : (record.isLocked ? 'text-indigo-600' : 'text-slate-300')}`}>
+                          ${dayTotal.toFixed(2)}
+                        </p>
+                        <svg className={`w-5 h-5 text-slate-300 transition-transform duration-300 ${isExpanded ? 'rotate-180 text-indigo-500' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-4 animate-in slide-in-from-top-1 duration-200">
+                        <div className="space-y-2">
+                          {record.expenses.map((expense) => (
+                            <div key={expense.id} className="flex gap-2 items-center animate-in fade-in duration-300">
+                              <input type="text" placeholder="Concepto de Gasto" value={expense.label || ''} onChange={(e) => handleExpenseChange(record.day, expense.id, 'label', e.target.value)} className="flex-grow px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                              <div className="relative w-28">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 text-xs font-bold">$</span>
+                                <input type="number" placeholder="0.00" value={expense.amount || ''} onChange={(e) => handleExpenseChange(record.day, expense.id, 'amount', e.target.value)} className="w-full pl-6 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                              </div>
+                              <button onClick={() => removeExpense(record.day, expense.id)} className="p-2 text-rose-300 hover:text-rose-500"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => addNewExpenseField(record.day)} className="flex-grow bg-white border border-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 hover:bg-slate-50 shadow-sm">
+                            <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+                            Agregar Gasto
+                          </button>
+                          <button onClick={() => handleCaptureClick(record.day)} disabled={loadingAI} className="bg-slate-900 text-white p-3 rounded-xl hover:bg-slate-800 disabled:opacity-50" title="Escanear Recibo"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg></button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         </div>
       </main>
-
-      <div className="fixed bottom-10 left-0 right-0 flex justify-center pointer-events-none px-4">
-        <button 
-          onClick={() => confirm("¿Resetear todo?") && setDays(Array.from({ length: 31 }, (_, i) => ({ day: i + 1, expenses: [] })))}
-          className="bg-slate-900 border-4 border-slate-800 text-white/50 px-12 py-5 rounded-full font-black text-[10px] uppercase tracking-[0.5em] shadow-2xl pointer-events-auto hover:text-rose-400 transition-all"
-        >
-          Borrar Datos Mes
-        </button>
-      </div>
     </div>
   );
 };

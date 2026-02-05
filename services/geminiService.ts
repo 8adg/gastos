@@ -1,69 +1,86 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-// Fixed imports: replaced Expense with DailyExpense and imported AIInsight
-import { DailyExpense, AIInsight } from "../types";
+import { DailyRecord, AIAnalysisResponse } from "../types";
 
-export const getFinancialAdvice = async (expenses: DailyExpense[], monthlyBudget: number): Promise<AIInsight> => {
-  // Always initialize GoogleGenAI with a named parameter object.
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+export const extractAmountFromImage = async (apiKey: string, base64Image: string, mimeType: string): Promise<number | null> => {
+  const ai = new GoogleGenAI({ apiKey });
+  const model = "gemini-3-flash-preview";
   
-  const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
-  // Fixed: DailyExpense uses 'description' instead of 'title' and does not have a 'date' field.
-  const history = expenses.slice(0, 30).map(e => `- ${e.description}: $${e.amount}`).join('\n');
-
-  const prompt = `Actúa como un experto en finanzas personales.
-Presupuesto mensual: $${monthlyBudget}
-Total gastado: $${totalSpent}
-Historial reciente:
-${history}
-
-Analiza si el usuario llegará a fin de mes con su ritmo actual. Devuelve un JSON con:
-1. "analysis": Resumen corto de la situación.
-2. "forecast": Una predicción de cuánto le sobrará o faltará.
-3. "recommendations": Un array con 3 consejos prácticos.`;
+  const prompt = "Eres un experto contable. Analiza esta imagen de un ticket o recibo y extrae el MONTO TOTAL. Responde ÚNICAMENTE con el número decimal, sin símbolos de moneda ni texto adicional. Si no encuentras un total claro, devuelve 0.";
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            analysis: { 
-              type: Type.STRING,
-              description: "Resumen corto y directo de la salud financiera actual."
-            },
-            forecast: { 
-              type: Type.STRING,
-              description: "Predicción numérica o descriptiva del balance al final del mes."
-            },
-            recommendations: { 
-              type: Type.ARRAY, 
-              items: { type: Type.STRING },
-              description: "Array de exactamente 3 consejos financieros prácticos."
-            }
-          },
-          required: ["analysis", "forecast", "recommendations"],
-          propertyOrdering: ["analysis", "forecast", "recommendations"]
-        }
+      model,
+      contents: {
+        parts: [
+          { inlineData: { data: base64Image, mimeType } },
+          { text: prompt }
+        ]
       }
     });
 
-    // Directly access the .text property from the response object as per SDK guidelines.
-    const jsonStr = response.text;
-    if (!jsonStr) {
-      throw new Error("Empty response from Gemini API");
-    }
-
-    return JSON.parse(jsonStr.trim());
+    const text = response.text?.trim() || "0";
+    const amount = parseFloat(text.replace(/[^0-9.]/g, ''));
+    return isNaN(amount) ? null : amount;
   } catch (error) {
-    console.error("AI Error:", error);
-    return {
-      analysis: "No se pudo completar el análisis automático.",
-      forecast: "Balance incierto",
-      recommendations: ["Mantén la disciplina en tus registros diarios.", "Evita gastos hormiga mientras se restablece el servicio."]
-    };
+    console.error("Error extracting amount:", error);
+    return null;
   }
+};
+
+export const analyzeExpenses = async (
+  apiKey: string,
+  records: DailyRecord[],
+  dailyBudget: number,
+  monthName: string
+): Promise<AIAnalysisResponse> => {
+  const ai = new GoogleGenAI({ apiKey });
+  const model = "gemini-3-flash-preview";
+  
+  const dataSummary = records.map(r => {
+    const totalDay = r.expenses.reduce((sum, e) => sum + e.amount, 0);
+    return `Día ${r.day}: ${totalDay} (${r.expenses.length} gastos)`;
+  }).join(', ');
+
+  const totalSpent = records.reduce((acc, r) => acc + r.expenses.reduce((s, e) => s + e.amount, 0), 0);
+
+  const prompt = `
+    Eres un experto en finanzas personales.
+    Mes: ${monthName}
+    Presupuesto diario base: ${dailyBudget}
+    Gastos: [${dataSummary}]
+    Total actual: ${totalSpent}
+
+    Analiza el comportamiento y da consejos. Devuelve también fórmulas de Google Sheets para un control dinámico.
+    Responde en JSON.
+  `;
+
+  const response = await ai.models.generateContent({
+    model,
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          insight: { type: Type.STRING },
+          recommendations: { type: Type.ARRAY, items: { type: Type.STRING } },
+          googleSheetsFormulas: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                label: { type: Type.STRING },
+                formula: { type: Type.STRING }
+              },
+              required: ["label", "formula"]
+            }
+          }
+        },
+        required: ["insight", "recommendations", "googleSheetsFormulas"]
+      }
+    }
+  });
+
+  return JSON.parse(response.text);
 };

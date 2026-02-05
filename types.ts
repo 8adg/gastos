@@ -1,25 +1,32 @@
 
-export interface DailyExpense {
+export interface ExpenseItem {
   id: string;
   amount: number;
-  description: string;
+  label: string; // Ahora es obligatorio para el reporte
 }
 
-export interface DayData {
+export interface DailyRecord {
   day: number;
-  expenses: DailyExpense[];
+  expenses: ExpenseItem[];
+  date: Date;
+  isLocked: boolean;
+  adjustedBudget: number;
 }
 
-// Added AIInsight interface to match the expected AI response structure
-export interface AIInsight {
-  analysis: string;
-  forecast: string;
+export interface MonthlySummary {
+  totalBudget: number;
+  totalSpent: number;
+  totalBalance: number;
+  projectedSpending: number;
+  isOverBudget: boolean;
+  currentDailyAllowance: number;
+}
+
+export interface AIAnalysisResponse {
+  insight: string;
   recommendations: string[];
-}
-
-export interface AppState {
-  monthlyTarget: number;
-  dailyExpenses: DayData[];
-  month: number;
-  year: number;
+  googleSheetsFormulas: {
+    label: string;
+    formula: string;
+  }[];
 }
