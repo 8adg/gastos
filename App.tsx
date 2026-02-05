@@ -191,6 +191,21 @@ const App: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
+  const handleRunAnalysis = async () => {
+    if (!apiKey) { setShowSettings(true); return; }
+    setLoadingAI(true);
+    try {
+      const monthName = new Intl.DateTimeFormat('es-ES', { month: 'long' }).format(new Date(selectedYear, selectedMonth));
+      const result = await analyzeExpenses(apiKey, records, initialDailyBudget, monthName);
+      setAiAnalysis(result);
+    } catch (e) {
+      console.error(e);
+      alert("Error al contactar con la IA. Revisa tu clave API.");
+    } finally {
+      setLoadingAI(false);
+    }
+  };
+
   const summary = useMemo<MonthlySummary>(() => {
     const totalSpent = rebalancedRecords.reduce((acc, r) => acc + r.expenses.reduce((s, e) => s + e.amount, 0), 0);
     const totalBudget = initialDailyBudget * rebalancedRecords.length;
@@ -203,9 +218,70 @@ const App: React.FC = () => {
     };
   }, [rebalancedRecords, initialDailyBudget]);
 
+  const chartData = useMemo(() => rebalancedRecords.map(r => ({
+    name: `${r.day}`,
+    gasto: r.expenses.reduce((s, e) => s + e.amount, 0),
+    meta: r.adjustedBudget,
+    isLocked: r.isLocked
+  })), [rebalancedRecords]);
+
   return (
     <div className="min-h-screen bg-slate-50 pb-12">
       <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={onFileChange} className="hidden" />
+
+      {/* Modal de Resultados IA */}
+      {aiAnalysis && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[3rem] w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 duration-300">
+            <div className="p-8 bg-indigo-600 text-white shrink-0">
+               <div className="flex items-center justify-between mb-2">
+                 <h3 className="text-2xl font-black">Auditoría Gemini AI</h3>
+                 <button onClick={() => setAiAnalysis(null)} className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-all">
+                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                 </button>
+               </div>
+               <p className="text-indigo-100 text-sm font-medium">Análisis detallado de tu comportamiento de gasto mensual.</p>
+            </div>
+            
+            <div className="p-8 overflow-y-auto space-y-8 flex-grow">
+               <section>
+                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Resumen de IA</h4>
+                 <p className="text-slate-700 leading-relaxed font-medium bg-slate-50 p-6 rounded-3xl border border-slate-100">{aiAnalysis.insight}</p>
+               </section>
+
+               <section>
+                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Recomendaciones</h4>
+                 <div className="grid gap-3">
+                   {aiAnalysis.recommendations.map((rec, i) => (
+                     <div key={i} className="flex gap-4 p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
+                       <div className="text-emerald-500 shrink-0">
+                         <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
+                       </div>
+                       <p className="text-emerald-800 text-sm font-bold">{rec}</p>
+                     </div>
+                   ))}
+                 </div>
+               </section>
+
+               <section>
+                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Fórmulas Google Sheets</h4>
+                 <div className="space-y-4">
+                   {aiAnalysis.googleSheetsFormulas.map((f, i) => (
+                     <div key={i} className="bg-slate-900 rounded-2xl p-5 group transition-all">
+                       <p className="text-[10px] font-black text-indigo-400 uppercase mb-2">{f.label}</p>
+                       <code className="text-indigo-100 text-xs font-mono block overflow-x-auto whitespace-nowrap scrollbar-hide">{f.formula}</code>
+                     </div>
+                   ))}
+                 </div>
+               </section>
+            </div>
+            
+            <div className="p-8 border-t bg-slate-50 shrink-0">
+              <button onClick={() => setAiAnalysis(null)} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black shadow-lg">Entendido</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showSettings && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
@@ -267,56 +343,77 @@ const App: React.FC = () => {
              </div>
           </section>
 
-          <button onClick={() => analyzeExpenses(apiKey, records, initialDailyBudget, 'Mes Actual').then(setAiAnalysis)} disabled={loadingAI} className="w-full bg-white border border-slate-200 p-6 rounded-3xl flex items-center justify-between group hover:border-indigo-500 transition-all">
+          <button onClick={handleRunAnalysis} disabled={loadingAI} className="w-full bg-white border border-slate-200 p-6 rounded-3xl flex items-center justify-between group hover:border-indigo-500 transition-all shadow-md">
              <div className="flex items-center gap-4">
                 <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-all">
-                   {loadingAI ? <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin"></div> : <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
+                   {loadingAI ? <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin group-hover:border-white"></div> : <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
                 </div>
-                <div className="text-left"><p className="text-sm font-black text-slate-800">IA Auditor</p><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Revisar Ahorros</p></div>
+                <div className="text-left"><p className="text-sm font-black text-slate-800">{loadingAI ? 'Analizando...' : 'IA Auditor'}</p><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Revisar Ahorros</p></div>
              </div>
+             {!loadingAI && <svg className="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>}
           </button>
         </div>
 
-        <div className="lg:col-span-8 space-y-4">
-           {rebalancedRecords.map((record) => {
-             const isExpanded = expandedDay === record.day;
-             const dayTotal = record.expenses.reduce((s, e) => s + e.amount, 0);
-             return (
-               <div key={record.day} className={`bg-white rounded-[2rem] border transition-all ${isExpanded ? 'border-indigo-500 shadow-xl' : 'border-slate-100'}`}>
-                 <div onClick={() => setExpandedDay(isExpanded ? null : record.day)} className="p-6 flex items-center justify-between cursor-pointer">
-                    <div className="flex items-center gap-5">
-                       <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black ${record.isLocked ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-300'}`}>
-                          {record.day}
-                       </div>
-                       <div><p className="text-sm font-black text-slate-800">Día {record.day}</p><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Meta: ${record.adjustedBudget.toFixed(2)}</p></div>
-                    </div>
-                    <p className={`text-2xl font-black ${dayTotal > record.adjustedBudget ? 'text-rose-500' : 'text-slate-800'}`}>${dayTotal.toFixed(2)}</p>
-                 </div>
-                 {isExpanded && (
-                   <div className="p-6 pt-0 space-y-4">
-                      {record.expenses.map(exp => (
-                        <div key={exp.id} className="flex gap-2">
-                           <input type="text" value={exp.label} onChange={(e) => {
-                             const newRecords = records.map(r => r.day === record.day ? {...r, isLocked: true, expenses: r.expenses.map(x => x.id === exp.id ? {...x, label: e.target.value} : x)} : r);
-                             setRecords(newRecords);
-                           }} className="flex-grow bg-slate-50 p-4 rounded-xl text-sm font-bold" />
-                           <input type="number" value={exp.amount} onChange={(e) => {
-                             const newRecords = records.map(r => r.day === record.day ? {...r, isLocked: true, expenses: r.expenses.map(x => x.id === exp.id ? {...x, amount: parseFloat(e.target.value) || 0} : x)} : r);
-                             setRecords(newRecords);
-                           }} className="w-24 bg-slate-50 p-4 rounded-xl text-sm font-black" />
-                        </div>
-                      ))}
-                      <div className="flex gap-2">
-                         <button onClick={() => addNewExpenseField(record.day)} className="flex-grow bg-slate-900 text-white py-4 rounded-xl text-[10px] font-black uppercase tracking-widest">Nuevo Gasto</button>
-                         <button onClick={() => handleCaptureClick(record.day)} className="bg-indigo-600 text-white p-4 rounded-xl">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                         </button>
+        <div className="lg:col-span-8 space-y-6">
+           {/* Gráfico de Barras */}
+           <section className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-200">
+             <div className="h-64 w-full">
+               <ResponsiveContainer width="100%" height="100%">
+                 <BarChart data={chartData}>
+                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                   <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11, fontWeight: 700}} />
+                   <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11}} />
+                   <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px -12px rgb(0 0 0 / 0.1)'}} />
+                   <Bar dataKey="gasto" radius={[6, 6, 0, 0]} barSize={20}>
+                     {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.isLocked ? (entry.gasto > entry.meta ? '#f43f5e' : '#6366f1') : '#f1f5f9'} />)}
+                   </Bar>
+                   <ReferenceLine y={initialDailyBudget} stroke="#cbd5e1" strokeDasharray="8 8" />
+                 </BarChart>
+               </ResponsiveContainer>
+             </div>
+           </section>
+
+           <div className="grid grid-cols-1 gap-4">
+             {rebalancedRecords.map((record) => {
+               const isExpanded = expandedDay === record.day;
+               const dayTotal = record.expenses.reduce((s, e) => s + e.amount, 0);
+               return (
+                 <div key={record.day} className={`bg-white rounded-[2rem] border transition-all ${isExpanded ? 'border-indigo-500 shadow-xl' : 'border-slate-100'}`}>
+                   <div onClick={() => setExpandedDay(isExpanded ? null : record.day)} className="p-6 flex items-center justify-between cursor-pointer">
+                      <div className="flex items-center gap-5">
+                         <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black ${record.isLocked ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-300'}`}>
+                            {record.day}
+                         </div>
+                         <div><p className="text-sm font-black text-slate-800">Día {record.day}</p><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Meta: ${record.adjustedBudget.toFixed(2)}</p></div>
                       </div>
+                      <p className={`text-2xl font-black ${dayTotal > record.adjustedBudget ? 'text-rose-500' : 'text-slate-800'}`}>${dayTotal.toFixed(2)}</p>
                    </div>
-                 )}
-               </div>
-             );
-           })}
+                   {isExpanded && (
+                     <div className="p-6 pt-0 space-y-4">
+                        {record.expenses.map(exp => (
+                          <div key={exp.id} className="flex gap-2 animate-in fade-in slide-in-from-left-2">
+                             <input type="text" value={exp.label} onChange={(e) => {
+                               const newRecords = records.map(r => r.day === record.day ? {...r, isLocked: true, expenses: r.expenses.map(x => x.id === exp.id ? {...x, label: e.target.value} : x)} : r);
+                               setRecords(newRecords);
+                             }} className="flex-grow bg-slate-50 p-4 rounded-xl text-sm font-bold border-none outline-none focus:ring-2 focus:ring-indigo-100" />
+                             <input type="number" value={exp.amount} onChange={(e) => {
+                               const newRecords = records.map(r => r.day === record.day ? {...r, isLocked: true, expenses: r.expenses.map(x => x.id === exp.id ? {...x, amount: parseFloat(e.target.value) || 0} : x)} : r);
+                               setRecords(newRecords);
+                             }} className="w-24 bg-slate-50 p-4 rounded-xl text-sm font-black border-none outline-none focus:ring-2 focus:ring-indigo-100" />
+                          </div>
+                        ))}
+                        <div className="flex gap-2">
+                           <button onClick={() => addNewExpenseField(record.day)} className="flex-grow bg-slate-900 text-white py-4 rounded-xl text-[10px] font-black uppercase tracking-widest active:scale-[0.98] transition-all">Nuevo Gasto</button>
+                           <button onClick={() => handleCaptureClick(record.day)} className="bg-indigo-600 text-white p-4 rounded-xl active:scale-[0.98] transition-all shadow-lg">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                           </button>
+                        </div>
+                     </div>
+                   )}
+                 </div>
+               );
+             })}
+           </div>
         </div>
       </main>
     </div>
