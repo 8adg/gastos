@@ -2,56 +2,48 @@
 const BASE_URL = 'https://api.keyvalue.xyz';
 
 export const syncService = {
-  // Genera un ID único (Intenta con el servidor, si falla lo hace local)
+  // Crea una llave oficial en el servidor
   createKey: async () => {
     try {
       const response = await fetch(`${BASE_URL}/new`, { 
-        method: 'POST',
-        mode: 'cors'
+        method: 'POST'
       });
       if (response.ok) {
         const url = await response.text();
-        return url.split('/').pop()?.trim() || null;
+        const key = url.split('/').pop()?.trim();
+        return key || null;
       }
     } catch (e) {
-      console.warn('Servidor de llaves no disponible, generando ID local...');
+      console.error('Error al solicitar nueva llave:', e);
     }
-    // Backup: Generador de ID aleatorio seguro si el servicio está caído
-    return 'gc-' + Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
+    // Si falla el servidor, generamos uno local compatible
+    return 'gc-' + Math.random().toString(36).substring(2, 12);
   },
 
-  // Guarda los datos
+  // Guarda los datos usando un formato de envío más permisivo para CORS
   save: async (key: string, data: any) => {
     if (!key || key.length < 5) return false;
     try {
+      // Enviamos como texto plano pero con estructura JSON para evitar preflight OPTIONS costosos
       const response = await fetch(`${BASE_URL}/${key}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        mode: 'cors',
         body: JSON.stringify(data),
       });
       return response.ok;
     } catch (e) {
-      console.error('Error al guardar en la nube:', e);
+      console.error('Error de red al guardar:', e);
       return false;
     }
   },
 
-  // Carga los datos
+  // Carga los datos de la nube
   load: async (key: string) => {
     if (!key || key.length < 5) return null;
     try {
-      const res = await fetch(`${BASE_URL}/${key}`, {
-        method: 'GET',
-        mode: 'cors',
-        headers: { 'Accept': 'application/json' }
-      });
-      
+      const res = await fetch(`${BASE_URL}/${key}`);
       if (res.ok) {
         const text = await res.text();
-        if (!text || text.trim() === "") return null;
+        if (!text || text.trim() === "" || text.includes("not found")) return null;
         try {
           return JSON.parse(text);
         } catch (e) {
@@ -59,7 +51,7 @@ export const syncService = {
         }
       }
     } catch (e) {
-      console.warn('Error al cargar (puede ser un ID nuevo):', e);
+      console.warn('Error al conectar con la llave:', e);
     }
     return null;
   }
