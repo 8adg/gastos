@@ -1,24 +1,26 @@
 
-export interface FuelEntry {
+export type Category = 'Alimentación' | 'Transporte' | 'Ocio' | 'Facturas' | 'Salud' | 'Hogar' | 'Otros';
+
+export interface Expense {
   id: string;
   date: string;
-  odometer: number; // Kilómetros totales
-  liters: number;
-  pricePerLiter: number;
-  totalCost: number;
-  fullTank: boolean;
+  title: string;
+  amount: number;
+  category: Category;
+  description?: string;
 }
 
-export interface FuelStats {
-  totalSpent: number;
-  totalLiters: number;
-  avgConsumption: number; // l/100km
-  avgPrice: number;
-  totalKm: number;
+export interface SpendingAnalysis {
+  summary: string;
+  warnings: string[];
+  savingTips: string[];
+  balanceStatus: 'Excelente' | 'Estable' | 'Crítico';
 }
 
-export interface AIInsight {
-  analysis: string;
-  tips: string[];
-  sheetsFormula: string;
+export interface ReceiptData {
+  merchant?: string;
+  date?: string;
+  total?: number;
+  items?: { name: string; price: number }[];
+  category?: Category;
 }
