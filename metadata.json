@@ -1,6 +1,7 @@
+
 {
-  "name": "Equilibrador de Gastos Pro + OCR",
-  "description": "Herramienta avanzada de control de gastos con reequilibrio dinámico, múltiples entradas por día y escáner de tickets por IA.",
+  "name": "GastosPro OCR - Daily Expense Manager",
+  "description": "Herramienta avanzada de control de gastos diarios con escáner de tickets por IA y análisis de salud financiera.",
   "requestFramePermissions": [
     "camera"
   ]
