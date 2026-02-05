@@ -1,90 +1,69 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Expense, SpendingAnalysis, ReceiptData } from "../types";
+// Fixed imports: replaced Expense with DailyExpense and imported AIInsight
+import { DailyExpense, AIInsight } from "../types";
 
-const MODEL_NAME = "gemini-3-flash-preview";
-
-export const scanReceipt = async (base64Image: string): Promise<ReceiptData> => {
+export const getFinancialAdvice = async (expenses: DailyExpense[], monthlyBudget: number): Promise<AIInsight> => {
+  // Always initialize GoogleGenAI with a named parameter object.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
   
-  const prompt = "Analiza esta imagen de un ticket de compra. Extrae el nombre del comercio, la fecha, el total pagado y los artículos individuales. Clasifica el gasto en una de estas categorías: Alimentación, Transporte, Ocio, Facturas, Salud, Hogar, Otros.";
+  const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
+  // Fixed: DailyExpense uses 'description' instead of 'title' and does not have a 'date' field.
+  const history = expenses.slice(0, 30).map(e => `- ${e.description}: $${e.amount}`).join('\n');
+
+  const prompt = `Actúa como un experto en finanzas personales.
+Presupuesto mensual: $${monthlyBudget}
+Total gastado: $${totalSpent}
+Historial reciente:
+${history}
+
+Analiza si el usuario llegará a fin de mes con su ritmo actual. Devuelve un JSON con:
+1. "analysis": Resumen corto de la situación.
+2. "forecast": Una predicción de cuánto le sobrará o faltará.
+3. "recommendations": Un array con 3 consejos prácticos.`;
 
   try {
     const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: [
-        {
-          parts: [
-            { text: prompt },
-            { inlineData: { mimeType: "image/jpeg", data: base64Image } }
-          ]
-        }
-      ],
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            merchant: { type: Type.STRING },
-            date: { type: Type.STRING },
-            total: { type: Type.NUMBER },
-            category: { type: Type.STRING },
-            items: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  price: { type: Type.NUMBER }
-                }
-              }
-            }
-          }
-        }
-      }
-    });
-
-    return JSON.parse(response.text || "{}");
-  } catch (error) {
-    console.error("OCR Error:", error);
-    throw error;
-  }
-};
-
-export const analyzeSpending = async (expenses: Expense[]): Promise<SpendingAnalysis> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-  
-  const history = expenses.slice(0, 30).map(e => `${e.date} | ${e.title} | ${e.category} | $${e.amount}`).join('\n');
-  
-  const prompt = `Analiza mi historial de gastos recientes y proporciona un informe de salud financiera:\n${history}`;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
+      model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            summary: { type: Type.STRING },
-            warnings: { type: Type.ARRAY, items: { type: Type.STRING } },
-            savingTips: { type: Type.ARRAY, items: { type: Type.STRING } },
-            balanceStatus: { type: Type.STRING, enum: ["Excelente", "Estable", "Crítico"] }
+            analysis: { 
+              type: Type.STRING,
+              description: "Resumen corto y directo de la salud financiera actual."
+            },
+            forecast: { 
+              type: Type.STRING,
+              description: "Predicción numérica o descriptiva del balance al final del mes."
+            },
+            recommendations: { 
+              type: Type.ARRAY, 
+              items: { type: Type.STRING },
+              description: "Array de exactamente 3 consejos financieros prácticos."
+            }
           },
-          required: ["summary", "warnings", "savingTips", "balanceStatus"]
+          required: ["analysis", "forecast", "recommendations"],
+          propertyOrdering: ["analysis", "forecast", "recommendations"]
         }
       }
     });
 
-    return JSON.parse(response.text || "{}");
+    // Directly access the .text property from the response object as per SDK guidelines.
+    const jsonStr = response.text;
+    if (!jsonStr) {
+      throw new Error("Empty response from Gemini API");
+    }
+
+    return JSON.parse(jsonStr.trim());
   } catch (error) {
-    console.error("Analysis Error:", error);
+    console.error("AI Error:", error);
     return {
-      summary: "No se pudo generar el análisis.",
-      warnings: [],
-      savingTips: ["Revisa tus gastos hormiga."],
-      balanceStatus: "Estable"
+      analysis: "No se pudo completar el análisis automático.",
+      forecast: "Balance incierto",
+      recommendations: ["Mantén la disciplina en tus registros diarios.", "Evita gastos hormiga mientras se restablece el servicio."]
     };
   }
 };
