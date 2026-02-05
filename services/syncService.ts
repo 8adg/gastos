@@ -2,29 +2,42 @@
 const BASE_URL = 'https://api.keyvalue.xyz';
 
 export const syncService = {
-  // Genera una clave aleatoria si el usuario no tiene una
-  generateKey: () => Math.random().toString(36).substring(2, 15),
-
   // Guarda los datos en la nube
   save: async (key: string, data: any) => {
+    if (!key || key.length < 3) return false;
     try {
-      // Usamos una estructura simple de KV store pública para persistencia gratuita
-      await fetch(`${BASE_URL}/${key}`, {
+      // Usamos el endpoint directo de la llave
+      const response = await fetch(`${BASE_URL}/${key}`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify(data),
       });
+      return response.ok;
     } catch (e) {
-      console.error('Error de sincronización', e);
+      console.error('Sync save error:', e);
+      return false;
     }
   },
 
   // Carga los datos desde la nube
   load: async (key: string) => {
+    if (!key || key.length < 3) return null;
     try {
       const res = await fetch(`${BASE_URL}/${key}`);
-      if (res.ok) return await res.json();
+      if (res.ok) {
+        const text = await res.text();
+        if (!text) return null;
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          console.error("JSON Parse error in sync load", e);
+          return null;
+        }
+      }
     } catch (e) {
-      console.error('Error al cargar datos', e);
+      console.warn('Sync load error (probably new key):', e);
     }
     return null;
   }
