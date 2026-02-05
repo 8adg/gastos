@@ -31,6 +31,7 @@ const App: React.FC = () => {
   }, []);
 
   const loadFromCloud = async (key: string) => {
+    if (!key) return;
     setIsSyncing(true);
     const cloudData = await syncService.load(key);
     if (cloudData) {
@@ -126,14 +127,14 @@ const App: React.FC = () => {
         <div className="flex items-center gap-2">
           <div className={`w-2 h-2 rounded-full ${syncKey ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`}></div>
           <span className="text-[10px] font-black uppercase tracking-widest">
-            {syncKey ? 'Sincronizado' : 'Solo Local (Datos en riesgo)'}
+            {syncKey ? 'Sincronizado' : 'Solo Local (Ingresa ID para Nube)'}
           </span>
         </div>
         <div className="flex items-center gap-2">
           <label className="text-[10px] font-black uppercase opacity-70">Sync ID:</label>
           <input 
             type="text" 
-            placeholder="Escribe tu clave secreta..."
+            placeholder="Tu clave secreta..."
             value={syncKey}
             onChange={handleSyncChange}
             className="bg-white/10 border-none rounded px-3 py-1 text-xs font-bold outline-none focus:bg-white/20 w-48"
@@ -148,11 +149,11 @@ const App: React.FC = () => {
 
       {/* Header Principal */}
       <header className="bg-white border-b shadow-sm sticky top-[40px] z-50">
-        <div className="max-w-6xl mx-auto px-4 py-6 flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="max-w-4xl mx-auto px-4 py-6 flex flex-col md:flex-row items-center justify-between gap-6">
           <div>
             <h1 className="text-2xl font-black text-slate-800 tracking-tighter uppercase">GasControl <span className="text-indigo-600">Pro</span></h1>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              Control de Equilibrado de Excedentes Diarios
+              Equilibrado Automático de Excedentes
             </p>
           </div>
 
@@ -171,7 +172,7 @@ const App: React.FC = () => {
             </div>
             <div className="w-px h-10 bg-slate-200"></div>
             <div className="px-4">
-              <p className="text-[9px] font-black text-slate-500 uppercase mb-1">Total Gastado Mes</p>
+              <p className="text-[9px] font-black text-slate-500 uppercase mb-1">Gasto Total Mes</p>
               <p className="text-2xl font-black text-indigo-600">
                 ${stats.reduce((acc, s) => acc + s.spent, 0).toFixed(2)}
               </p>
@@ -180,9 +181,9 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Grid Calendario */}
-      <main className="max-w-6xl mx-auto px-4 py-10">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      {/* Grid Calendario - Ajustado a 2 COLUMNAS */}
+      <main className="max-w-4xl mx-auto px-4 py-10">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {stats.map(s => {
             const dayData = days.find(d => d.day === s.day);
             const isToday = s.day === now.getDate();
@@ -191,21 +192,21 @@ const App: React.FC = () => {
             return (
               <div 
                 key={s.day} 
-                className={`bg-white rounded-3xl border-2 transition-all flex flex-col ${
+                className={`bg-white rounded-[2.5rem] border-2 transition-all flex flex-col ${
                   isToday ? 'border-indigo-500 shadow-xl shadow-indigo-100 ring-4 ring-indigo-50' : 'border-slate-100'
                 }`}
               >
                 {/* Cabecera Día */}
-                <div className={`p-4 flex justify-between items-center ${
+                <div className={`p-5 flex justify-between items-center ${
                   isToday ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-800 border-b border-slate-100'
-                } rounded-t-[1.4rem]`}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl font-black">Día {s.day}</span>
-                    {isToday && <span className="bg-white/20 text-[8px] px-2 py-0.5 rounded-full font-black uppercase">HOY</span>}
+                } rounded-t-[2.3rem]`}>
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl font-black tracking-tighter">Día {s.day}</span>
+                    {isToday && <span className="bg-white/20 text-[9px] px-3 py-1 rounded-full font-black uppercase">HOY</span>}
                   </div>
                   <button 
                     onClick={() => addExpense(s.day)}
-                    className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-lg shadow-sm ${
+                    className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-xl shadow-md transition-transform active:scale-95 ${
                       isToday ? 'bg-white text-indigo-600' : 'bg-indigo-600 text-white'
                     }`}
                   >
@@ -214,48 +215,48 @@ const App: React.FC = () => {
                 </div>
 
                 {/* Info Financiera */}
-                <div className="p-5 space-y-4 flex-grow">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                      <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Asignado</p>
-                      <p className={`text-xs font-black ${s.assigned < 0 ? 'text-rose-500' : 'text-slate-600'}`}>
+                <div className="p-6 space-y-6 flex-grow">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                      <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Monto Asignado</p>
+                      <p className={`text-lg font-black ${s.assigned < 0 ? 'text-rose-500' : 'text-slate-700'}`}>
                         ${s.assigned.toFixed(2)}
                       </p>
                     </div>
-                    <div className={`${isCritical ? 'bg-rose-50 border-rose-100' : 'bg-emerald-50 border-emerald-100'} p-2 rounded-xl border`}>
-                      <p className="text-[8px] font-black text-slate-400 uppercase mb-0.5">Restante</p>
-                      <p className={`text-xs font-black ${isCritical ? 'text-rose-600' : 'text-emerald-600'}`}>
+                    <div className={`${isCritical ? 'bg-rose-50 border-rose-100' : 'bg-emerald-50 border-emerald-100'} p-3 rounded-2xl border`}>
+                      <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Restante Hoy</p>
+                      <p className={`text-lg font-black ${isCritical ? 'text-rose-600' : 'text-emerald-600'}`}>
                         ${s.remaining.toFixed(2)}
                       </p>
                     </div>
                   </div>
 
                   {/* Lista de Gastos */}
-                  <div className="space-y-1.5 max-h-32 overflow-y-auto min-h-[40px]">
+                  <div className="space-y-2 max-h-48 overflow-y-auto min-h-[50px] pr-1">
                     {dayData?.expenses.map(exp => (
-                      <div key={exp.id} className="flex justify-between items-center bg-slate-50 p-2 rounded-lg group">
+                      <div key={exp.id} className="flex justify-between items-center bg-slate-50/50 p-3 rounded-xl border border-dashed border-slate-200 group transition-all hover:bg-white hover:border-indigo-200">
                         <div className="overflow-hidden">
-                          <p className="text-[9px] font-bold text-slate-400 truncate">{exp.description}</p>
-                          <p className="text-xs font-black text-slate-700">${exp.amount.toFixed(2)}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tight truncate">{exp.description}</p>
+                          <p className="text-sm font-black text-slate-800">${exp.amount.toFixed(2)}</p>
                         </div>
                         <button 
                           onClick={() => deleteExpense(s.day, exp.id)}
-                          className="text-slate-200 hover:text-rose-500 p-1 opacity-0 group-hover:opacity-100 transition-all"
+                          className="text-slate-300 hover:text-rose-500 p-2 opacity-0 group-hover:opacity-100 transition-all"
                         >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
                       </div>
                     ))}
                     {!dayData?.expenses.length && (
-                      <p className="text-[9px] text-slate-300 italic text-center py-2">Sin gastos</p>
+                      <p className="text-[10px] text-slate-300 italic text-center py-6">No hay gastos para este día</p>
                     )}
                   </div>
                 </div>
 
                 {/* Pie Gasto Total */}
-                <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 rounded-b-3xl flex justify-between items-center">
-                  <span className="text-[9px] font-black text-slate-400 uppercase">Gasto Día</span>
-                  <span className="font-black text-slate-800 text-sm">${s.spent.toFixed(2)}</span>
+                <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 rounded-b-[2.3rem] flex justify-between items-center">
+                  <span className="text-[10px] font-black text-slate-400 uppercase">Gasto Total Día</span>
+                  <span className="font-black text-slate-800 text-lg">${s.spent.toFixed(2)}</span>
                 </div>
               </div>
             );
@@ -263,18 +264,19 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      <div className="fixed bottom-6 right-6 z-[100]">
+      {/* Botón Reset */}
+      <div className="fixed bottom-8 right-8 z-[100]">
         <button 
           onClick={() => {
-            if(confirm("¿Borrar todo el mes local y nube?")) {
+            if(confirm("¿Estás seguro de borrar todo el registro mensual local y en la nube?")) {
               setDays(Array.from({ length: daysInMonth }, (_, i) => ({ day: i + 1, expenses: [] })));
               if(syncKey) syncService.save(syncKey, { days: [], target: dailyTarget });
             }
           }}
-          className="bg-white border-2 border-slate-200 text-slate-400 p-4 rounded-full shadow-2xl hover:text-rose-500 hover:border-rose-200 transition-all"
-          title="Resetear Mes"
+          className="bg-white border-2 border-slate-200 text-slate-400 p-5 rounded-full shadow-2xl hover:text-rose-500 hover:border-rose-200 transition-all active:scale-90"
+          title="Resetear Todo el Mes"
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+          <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
         </button>
       </div>
     </div>
